@@ -31,6 +31,7 @@ import NodeSettingsHeader from '@/components/NodeSettingsHeader.vue';
 import get from 'lodash/get';
 
 import NodeExecuteButton from './NodeExecuteButton.vue';
+import { nameIsParameter } from '@/utils/nodeSettingsUtils';
 import { isCommunityPackageName } from '@/utils/nodeTypesUtils';
 import { useWorkflowsStore } from '@/stores/workflows.store';
 import { useNDVStore } from '@/stores/ndv.store';
@@ -369,7 +370,7 @@ const valueChanged = (parameterData: IUpdateInformation) => {
 			nodeHelpers.updateNodeParameterIssuesByName(_node.name);
 			nodeHelpers.updateNodeCredentialIssuesByName(_node.name);
 		}
-	} else if (nodeSettingsParameters.nameIsParameter(parameterData)) {
+	} else if (nameIsParameter(parameterData)) {
 		// A node parameter changed
 		nodeSettingsParameters.updateNodeParameter(parameterData, newValue, _node, isToolNode.value);
 	} else {
@@ -434,6 +435,7 @@ const populateSettings = () => {
 					default: false,
 					noDataExpression: true,
 					description: i18n.baseText('nodeSettings.alwaysOutputData.description'),
+					isNodeSetting: true,
 				},
 				{
 					displayName: i18n.baseText('nodeSettings.executeOnce.displayName'),
@@ -442,6 +444,7 @@ const populateSettings = () => {
 					default: false,
 					noDataExpression: true,
 					description: i18n.baseText('nodeSettings.executeOnce.description'),
+					isNodeSetting: true,
 				},
 				{
 					displayName: i18n.baseText('nodeSettings.retryOnFail.displayName'),
@@ -450,6 +453,7 @@ const populateSettings = () => {
 					default: false,
 					noDataExpression: true,
 					description: i18n.baseText('nodeSettings.retryOnFail.description'),
+					isNodeSetting: true,
 				},
 				{
 					displayName: i18n.baseText('nodeSettings.maxTries.displayName'),
@@ -467,6 +471,7 @@ const populateSettings = () => {
 					},
 					noDataExpression: true,
 					description: i18n.baseText('nodeSettings.maxTries.description'),
+					isNodeSetting: true,
 				},
 				{
 					displayName: i18n.baseText('nodeSettings.waitBetweenTries.displayName'),
@@ -484,6 +489,7 @@ const populateSettings = () => {
 					},
 					noDataExpression: true,
 					description: i18n.baseText('nodeSettings.waitBetweenTries.description'),
+					isNodeSetting: true,
 				},
 				{
 					displayName: i18n.baseText('nodeSettings.onError.displayName'),
@@ -513,6 +519,7 @@ const populateSettings = () => {
 					default: 'stopWorkflow',
 					description: i18n.baseText('nodeSettings.onError.description'),
 					noDataExpression: true,
+					isNodeSetting: true,
 				},
 			] as INodeProperties[]),
 		);
@@ -529,6 +536,7 @@ const populateSettings = () => {
 				default: '',
 				noDataExpression: true,
 				description: i18n.baseText('nodeSettings.notes.description'),
+				isNodeSetting: true,
 			},
 			{
 				displayName: i18n.baseText('nodeSettings.notesInFlow.displayName'),
@@ -537,6 +545,7 @@ const populateSettings = () => {
 				default: false,
 				noDataExpression: true,
 				description: i18n.baseText('nodeSettings.notesInFlow.description'),
+				isNodeSetting: true,
 			},
 		] as INodeProperties[]),
 	);

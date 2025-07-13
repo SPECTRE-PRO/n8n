@@ -7,7 +7,7 @@ import { getMappedExpression } from '@/utils/mappingUtils';
 import { getPairedItemId } from '@/utils/pairedItemUtils';
 import { shorten } from '@/utils/typesUtils';
 import type { GenericValue, IDataObject, INodeExecutionData } from 'n8n-workflow';
-import { computed, onMounted, ref, watch } from 'vue';
+import { useTemplateRef, computed, onMounted, ref, watch } from 'vue';
 import Draggable from '@/components/Draggable.vue';
 import MappingPill from './MappingPill.vue';
 import TextWithHighlights from './TextWithHighlights.vue';
@@ -35,6 +35,7 @@ type Props = {
 	headerBgColor?: 'base' | 'light';
 	compact?: boolean;
 	disableHoverHighlight?: boolean;
+	collapsingColumnName: string | null;
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -52,18 +53,24 @@ const emit = defineEmits<{
 	activeRowChanged: [row: number | null];
 	displayModeChange: [mode: IRunDataDisplayMode];
 	mounted: [data: { avgRowHeight: number }];
+	collapsingColumnChanged: [columnName: string | null];
 }>();
 
 const externalHooks = useExternalHooks();
+
+const tableRef = useTemplateRef('tableRef');
+
 const activeColumn = ref(-1);
 const forceShowGrip = ref(false);
 const draggedColumn = ref(false);
 const draggingPath = ref<string | null>(null);
 const hoveringPath = ref<string | null>(null);
+const hoveringColumnIndex = ref<number>(-1);
 const activeRow = ref<number | null>(null);
 const columnLimit = ref(MAX_COLUMNS_LIMIT);
 const columnLimitExceeded = ref(false);
 const draggableRef = ref<DraggableRef>();
+const fixedColumnWidths = ref<number[] | undefined>();
 
 const ndvStore = useNDVStore();
 const workflowsStore = useWorkflowsStore();
@@ -82,6 +89,13 @@ const canDraggableDrop = computed(() => ndvStore.canDraggableDrop);
 const draggableStickyPosition = computed(() => ndvStore.draggableStickyPos);
 const pairedItemMappings = computed(() => workflowsStore.workflowExecutionPairedItemMappings);
 const tableData = computed(() => convertToTable(props.inputData));
+const collapsingColumnIndex = computed(() => {
+	if (!props.collapsingColumnName) {
+		return -1;
+	}
+
+	return tableData.value.columns.indexOf(props.collapsingColumnName);
+});
 
 onMounted(() => {
 	if (tableData.value?.columns && draggableRef.value) {
@@ -145,10 +159,14 @@ function showExecutionLink(index: number) {
 
 function onMouseEnterCell(e: MouseEvent) {
 	const target = e.target;
-	if (target && props.mappingEnabled) {
-		const col = (target as HTMLElement).dataset.col;
-		if (col && !isNaN(parseInt(col, 10))) {
-			activeColumn.value = parseInt(col, 10);
+	const col = (target as HTMLElement).dataset.col;
+	const parsedCol = col ? parseInt(col, 10) : Number.NaN;
+
+	if (!isNaN(parsedCol)) {
+		hoveringColumnIndex.value = parsedCol;
+
+		if (target && props.mappingEnabled) {
+			activeColumn.value = parsedCol;
 		}
 	}
 
@@ -165,6 +183,7 @@ function onMouseLeaveCell() {
 	activeColumn.value = -1;
 	activeRow.value = null;
 	emit('activeRowChanged', null);
+	hoveringColumnIndex.value = -1;
 }
 
 function onMouseEnterKey(path: Array<string | number>, colIndex: number) {
@@ -419,6 +438,15 @@ function switchToJsonView() {
 	emit('displayModeChange', 'json');
 }
 
+function handleSetCollapsingColumn(columnIndex: number) {
+	emit(
+		'collapsingColumnChanged',
+		collapsingColumnIndex.value === columnIndex
+			? null
+			: (tableData.value.columns[columnIndex] ?? null),
+	);
+}
+
 watch(focusedMappableInput, (curr) => {
 	setTimeout(
 		() => {
@@ -427,6 +455,27 @@ watch(focusedMappableInput, (curr) => {
 		curr ? 300 : 150,
 	);
 });
+
+watch(
+	[collapsingColumnIndex, tableRef],
+	([index, table]) => {
+		if (index === -1) {
+			fixedColumnWidths.value = undefined;
+			return;
+		}
+
+		if (table === null) {
+			return;
+		}
+
+		fixedColumnWidths.value = [...table.querySelectorAll('thead tr th')].map((el) =>
+			el instanceof HTMLElement
+				? el.getBoundingClientRect().width // using getBoundingClientRect for decimal accuracy
+				: 0,
+		);
+	},
+	{ immediate: true, flush: 'post' },
+);
 </script>
 
 <template>
@@ -437,6 +486,7 @@ watch(focusedMappableInput, (curr) => {
 				[$style.highlight]: highlight,
 				[$style.lightHeader]: headerBgColor === 'light',
 				[$style.compact]: props.compact,
+				[$style.hasCollapsingColumn]: fixedColumnWidths !== undefined,
 			},
 		]"
 	>
@@ -500,13 +550,23 @@ watch(focusedMappableInput, (curr) => {
 				</tr>
 			</tbody>
 		</table>
-		<table v-else :class="$style.table">
+		<table v-else ref="tableRef" :class="$style.table">
+			<colgroup v-if="fixedColumnWidths">
+				<col v-for="(width, i) in fixedColumnWidths" :key="i" :width="width" />
+			</colgroup>
 			<thead>
 				<tr>
 					<th v-if="tableData.metadata.hasExecutionIds" :class="$style.executionLinkRowHeader">
 						<!-- column for execution link -->
 					</th>
-					<th v-for="(column, i) in tableData.columns || []" :key="column">
+					<th
+						v-for="(column, i) in tableData.columns || []"
+						:key="column"
+						:class="{
+							[$style.isCollapsingColumn]: collapsingColumnIndex === i,
+							[$style.isHoveredColumn]: hoveringColumnIndex === i,
+						}"
+					>
 						<N8nTooltip placement="bottom-start" :disabled="!mappingEnabled" :show-after="1000">
 							<template #content>
 								<div>
@@ -540,7 +600,23 @@ watch(focusedMappableInput, (curr) => {
 											:content="getValueToRender(column || '')"
 											:search="search"
 										/>
-										<div :class="$style.dragButton">
+										<N8nTooltip
+											:content="i18n.baseText('dataMapping.tableView.columnCollapsing.tooltip')"
+											:disabled="mappingEnabled || collapsingColumnIndex === i"
+										>
+											<N8nIconButton
+												:class="$style.collapseColumnButton"
+												type="tertiary"
+												size="xmini"
+												text
+												:icon="
+													collapsingColumnIndex === i ? 'chevrons-up-down' : 'chevrons-down-up'
+												"
+												:aria-label="i18n.baseText('dataMapping.tableView.columnCollapsing')"
+												@click="handleSetCollapsingColumn(i)"
+											/>
+										</N8nTooltip>
+										<div v-if="mappingEnabled" :class="$style.dragButton">
 											<n8n-icon icon="grip-vertical" />
 										</div>
 									</div>
@@ -629,7 +705,10 @@ watch(focusedMappableInput, (curr) => {
 						:key="index2"
 						:data-row="index1"
 						:data-col="index2"
-						:class="hasJsonInColumn(index2) ? $style.minColWidth : $style.limitColWidth"
+						:class="[
+							hasJsonInColumn(index2) ? $style.minColWidth : $style.limitColWidth,
+							collapsingColumnIndex === index2 ? $style.isCollapsingColumn : '',
+						]"
 						@mouseenter="onMouseEnterCell"
 						@mouseleave="onMouseLeaveCell"
 					>
@@ -757,6 +836,41 @@ watch(focusedMappableInput, (curr) => {
 	td:last-child {
 		border-right: var(--border-base);
 	}
+
+	.hasCollapsingColumn & {
+		table-layout: fixed;
+
+		td:not(.isCollapsingColumn) {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+
+			& :global(.n8n-tree) {
+				height: 1.5em;
+				overflow: hidden;
+			}
+		}
+	}
+}
+
+th.isCollapsingColumn {
+	border-top-color: var(--color-foreground-xdark);
+	border-left-color: var(--color-foreground-xdark);
+	border-right-color: var(--color-foreground-xdark);
+}
+
+td.isCollapsingColumn {
+	border-left-color: var(--color-foreground-xdark);
+	border-right-color: var(--color-foreground-xdark);
+
+	tr:last-child & {
+		border-bottom-color: var(--color-foreground-xdark);
+	}
+}
+
+td.isCollapsingColumn + td,
+th.isCollapsingColumn + th {
+	border-left-color: var(--color-foreground-xdark);
 }
 
 .nodeClass {
@@ -808,7 +922,10 @@ watch(focusedMappableInput, (curr) => {
 
 .dragButton {
 	opacity: 0;
-	margin-left: var(--spacing-2xs);
+
+	& > svg {
+		vertical-align: middle;
+	}
 }
 
 .dataKey {
@@ -884,5 +1001,20 @@ watch(focusedMappableInput, (curr) => {
 
 .executionLinkRowHeader {
 	width: var(--spacing-m);
+}
+
+.collapseColumnButton {
+	span {
+		flex-shrink: 0;
+	}
+
+	opacity: 0;
+	margin-block: calc(-2 * var(--spacing-2xs));
+
+	.isCollapsingColumn &,
+	th.isHoveredColumn &,
+	th:hover & {
+		opacity: 1;
+	}
 }
 </style>
